@@ -194,6 +194,7 @@ const App = () => {
             <FacultyLayout user={user} handleLogout={handleLogout} />
           }>
             <Route path="/" element={<Home />} />
+            <Route path="/:PageID" element={<Home />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/copo" element={<CoAnalysis />} />
             <Route path="/report-generator" element={<Testing />} />

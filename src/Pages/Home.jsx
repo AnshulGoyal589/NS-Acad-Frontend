@@ -134,9 +134,9 @@ const Home = () => { // Changed from ({}) to ()
         <div className="mx-auto max-w-7xl px-4 sm:px-8">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 py-4 sm:h-20">
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+              <h3 className="text-base font-bold text-slate-900 tracking-tight">
                 {pageData.title || 'Loading...'}
-              </h1>
+              </h3>
             </div>
             <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto">
               {/* Year Selector */}
