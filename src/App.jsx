@@ -11,6 +11,7 @@ import Register from './Authentication/Register';
 import Query from './Components/HOD/Dashboard';
 import FacultyDetails from './Components/HOD/FacultyDetails';
 import CoAnalysis from './Pages/Faculty/COPO/CoAnalysis';
+import AttainmentDashboard from './Pages/Faculty/COPO/AttainmentDashboard';
 import SideBar from './Components/Faculty/Performance/SideBar';
 import Navbar from './Components/Faculty/Performance/Navbar';
 import Profile from './Components/Faculty/Performance/Profile';
@@ -197,6 +198,7 @@ const App = () => {
             <Route path="/:PageID" element={<Home />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/copo" element={<CoAnalysis />} />
+            <Route path="/copo/dashboard" element={<AttainmentDashboard />} />
             <Route path="/report-generator" element={<Testing />} />
             <Route path="/pdf-test" element={<PDFTestPage />} />
           </Route>

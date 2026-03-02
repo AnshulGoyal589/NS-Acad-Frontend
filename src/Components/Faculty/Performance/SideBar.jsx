@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, LayoutDashboard, BookOpen, Users, Award, Briefcase } from 'lucide-react';
+import { ChevronDown, LayoutDashboard, BookOpen, Users, Award, Briefcase, BarChart3 } from 'lucide-react';
 
 const SideBar = () => {
   return (
@@ -182,6 +182,25 @@ const SideBar = () => {
               <div id='b6b8e826-68e1-4a34-8744-3f729db9204e' onClick={ () => window.location.href = `/b6b8e826-68e1-4a34-8744-3f729db9204e` } className="w-full text-left px-3 py-2 text-sm text-blue-700 hover:text-blue-900 hover:bg-blue-50 rounded-md transition-all duration-200 flex items-center gap-2 cursor-pointer">
                 <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
                 Material Consulted
+              </div>
+            </div>
+          </details>
+
+          {/* COPO Analysis Section */}
+          <details className="group">
+            <summary className="flex items-center gap-3 p-3 font-medium cursor-pointer hover:bg-blue-100 rounded-lg transition-all duration-200 outline-none">
+              <BarChart3 className="w-5 h-5 text-blue-500" />
+              <span className="text-sm font-semibold text-blue-600">COPO Analysis</span>
+              <ChevronDown className="w-4 h-4 ml-auto transition-transform group-open:rotate-180 text-blue-500" />
+            </summary>
+            <div className="mt-2 ml-4 space-y-1 border-l-2 border-blue-200 pl-4">
+              <div onClick={() => window.location.href = `/copo`} className="w-full text-left px-3 py-2 text-sm text-blue-700 hover:text-blue-900 hover:bg-blue-50 rounded-md transition-all duration-200 flex items-center gap-2 cursor-pointer">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+                Assessment Form
+              </div>
+              <div onClick={() => window.location.href = `/copo/dashboard`} className="w-full text-left px-3 py-2 text-sm text-blue-700 hover:text-blue-900 hover:bg-blue-50 rounded-md transition-all duration-200 flex items-center gap-2 cursor-pointer">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+                Attainment Dashboard
               </div>
             </div>
           </details>

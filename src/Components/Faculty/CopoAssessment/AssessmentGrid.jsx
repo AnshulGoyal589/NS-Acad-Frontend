@@ -20,7 +20,10 @@ const AssessmentGrid = ({
   const [loading, setLoading] = useState(false); // Added loading state
   const [numberOfStudents, setNumberOfStudents] = useState(0); // Start with 0, update on fetch/upload
   const [students, setStudents] = useState([]);
-  // Initial default CO selections (can be overridden by fetched data)
+  const [assessmentData, setAssessmentData] = useState(null); // Raw fetched assessment data
+  // Ref to always have latest initializeStudentMarks without adding it to fetchAssessmentData deps
+  const initStudentMarksRef = React.useRef(null);
+
   const [selectedCOs, setSelectedCOs] = useState(() => {
       const initial = {};
       for (let i = 1; i <= 5; i++) {
@@ -124,6 +127,8 @@ const AssessmentGrid = ({
     return newStudent;
   }, [type, tmsType, selectedCOs]); // Dependencies for initialization logic
 
+  // Keep ref in sync with latest initializeStudentMarks without triggering fetch loop
+  React.useEffect(() => { initStudentMarksRef.current = initializeStudentMarks; }, [initializeStudentMarks]);
 
   // --- Fetch Data ---
   const fetchAssessmentData = useCallback(async () => {
@@ -209,7 +214,8 @@ const AssessmentGrid = ({
         }
 
         // Initialize marks structure for each student from fetched data
-        const initializedStudents = fetchedData.students?.map(initializeStudentMarks) || [];
+        const initializer = initStudentMarksRef.current || initializeStudentMarks;
+        const initializedStudents = fetchedData.students?.map(initializer) || [];
         setStudents(initializedStudents);
         setNumberOfStudents(initializedStudents.length || 0); // Set count based on fetched data
 
@@ -232,61 +238,117 @@ const AssessmentGrid = ({
     } finally {
       setLoading(false);
     }
-  }, [facultyId, type, assessmentNumber, tmsType, subjectCode, branch, section, semester, academicYear, initializeStudentMarks]); // Added initializeStudentMarks
+  }, [facultyId, type, assessmentNumber, tmsType, subjectCode, branch, section, semester, academicYear]);
+  // NOTE: intentionally excluding initializeStudentMarks from deps to prevent
+  // setSelectedCOs (called inside fetch) from triggering an infinite re-fetch cycle.
 
   useEffect(() => {
     fetchAssessmentData();
   }, [fetchAssessmentData]); // Use the memoized fetch function
 
 
-  // --- File Upload ---
+  // --- File Upload (parses marks for TMS/TCA/TES from CSV) ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setLoading(true);
+
+    // Helper: find column key case-insensitively ignoring spaces/underscores/dashes
+    const findKey = (row, ...aliases) => Object.keys(row).find(k =>
+      aliases.some(a => k.toLowerCase().replace(/[\s_\-]/g,'') === a.toLowerCase().replace(/[\s_\-]/g,''))
+    );
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
           const data = evt.target.result;
           const workbook = XLSX.read(data, { type: 'array' });
           const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-          // Explicitly ask for raw values to avoid potential date issues
-          const excelData = XLSX.utils.sheet_to_json(firstSheet, { raw: true });
+          const excelData = XLSX.utils.sheet_to_json(firstSheet, { raw: true, defval: '' });
 
           const uploadedStudents = excelData.map(row => {
-            // Handle potential variations in column names (case-insensitive)
-            const rollNoKey = Object.keys(row).find(key => key.toLowerCase().replace(/\s+/g, '') === 'rollno' || key.toLowerCase().replace(/\s+/g, '') === 'rollnumber');
-            const nameKey = Object.keys(row).find(key => key.toLowerCase().replace(/\s+/g, '') === 'name' || key.toLowerCase().replace(/\s+/g, '') === 'studentname');
+            const rollNoKey = findKey(row, 'rollno', 'rollnumber', 'roll no', 'roll_no');
+            const nameKey   = findKey(row, 'name', 'studentname');
 
             const student = {
-              // Convert roll number to string to handle potential numeric formatting issues
               rollNo: rollNoKey ? String(row[rollNoKey]).trim() : '',
-              name: nameKey ? String(row[nameKey]).trim() : '',
-              // Initialize marks structure using the helper
+              name:   nameKey   ? String(row[nameKey]).trim()   : '',
             };
-             return initializeStudentMarks(student); // Use the init helper
-          }).filter(student => student.rollNo && student.name); // Filter valid students
+            if (!student.rollNo || !student.name) return null;
+
+            // ── TMS: Q1_PartA, Q1_PartB … Q5_PartA, Q5_PartB ──────────────
+            if (type === 'tms') {
+              const entry = { type: tmsType, questions: [] };
+              for (let q = 1; q <= 5; q++) {
+                const aKey = findKey(row, `Q${q}_PartA`, `Q${q}PartA`, `Q${q}_A`);
+                const bKey = findKey(row, `Q${q}_PartB`, `Q${q}PartB`, `Q${q}_B`);
+                entry.questions.push({
+                  partA: { maxMarks: 5, coNumber: selectedCOs[q]?.partA || 'CO1', marksObtained: aKey ? (Number(row[aKey]) || undefined) : undefined },
+                  partB: { maxMarks: 5, coNumber: selectedCOs[q]?.partB || 'CO1', marksObtained: bKey ? (Number(row[bKey]) || undefined) : undefined },
+                });
+              }
+              student.tmsMarks = [entry];
+
+            // ── TES: Q1_A, Q1_B, Q1_C … Q5_A, Q5_B, Q5_C ─────────────────
+            } else if (type === 'tes') {
+              const entry = { questions: [] };
+              for (let q = 1; q <= 5; q++) {
+                const aKey = findKey(row, `Q${q}_A`, `Q${q}A`, `Q${q}_PartA`);
+                const bKey = findKey(row, `Q${q}_B`, `Q${q}B`, `Q${q}_PartB`);
+                const cKey = findKey(row, `Q${q}_C`, `Q${q}C`, `Q${q}_PartC`);
+                entry.questions.push({
+                  partA: { maxMarks: 7, coNumber: selectedCOs[q]?.partA || 'CO1', marksObtained: aKey ? (Number(row[aKey]) || undefined) : undefined },
+                  partB: { maxMarks: 7, coNumber: selectedCOs[q]?.partB || 'CO1', marksObtained: bKey ? (Number(row[bKey]) || undefined) : undefined },
+                  partC: { maxMarks: 6, coNumber: selectedCOs[q]?.partC || 'CO1', marksObtained: cKey ? (Number(row[cKey]) || undefined) : undefined },
+                });
+              }
+              student.tesMarks = [entry];
+
+            // ── TCA: CT1_Q1_P1, CT1_Q1_P2, CT1_Q2_P1, CT1_Q2_P2, CT2_Q1_P1, CT2_Q1_P2
+            } else if (type === 'tca') {
+              const mk = (k) => k ? (Number(row[k]) || undefined) : undefined;
+              const mkDist = (k, qKey) => {
+                const v = mk(k);
+                if (v === undefined) return { value: undefined, coDistribution: {} };
+                const selected = tcaSelectedCOs[qKey] || {};
+                const coKeys = Object.entries(selected).filter(([,s])=>s).map(([co])=>co);
+                const dist = {};
+                if (coKeys.length > 0) coKeys.forEach(co => { dist[co.toUpperCase()] = v / coKeys.length; });
+                return { value: v, coDistribution: dist };
+              };
+              student.tcaMarks = [
+                { assessmentNumber: 1, marks: {
+                    q1p1: mkDist(findKey(row, 'CT1_Q1_P1', 'ct1q1p1'), 1),
+                    q1p2: mkDist(findKey(row, 'CT1_Q1_P2', 'ct1q1p2'), 1),
+                    q2p1: mkDist(findKey(row, 'CT1_Q2_P1', 'ct1q2p1'), 3),
+                    q2p2: mkDist(findKey(row, 'CT1_Q2_P2', 'ct1q2p2'), 3),
+                }},
+                { assessmentNumber: 2, marks: {
+                    q1p1: mkDist(findKey(row, 'CT2_Q1_P1', 'ct2q1p1'), 2),
+                    q1p2: mkDist(findKey(row, 'CT2_Q1_P2', 'ct2q1p2'), 2),
+                }},
+              ];
+            }
+
+            return initializeStudentMarks(student);
+          }).filter(Boolean);
 
           setStudents(uploadedStudents);
           setNumberOfStudents(uploadedStudents.length);
-          setSaveStatus('Student list populated from file.');
-          setTimeout(() => setSaveStatus(''), 3000);
+          setSaveStatus(`✅ ${uploadedStudents.length} students loaded with marks.`);
+
+          setTimeout(() => setSaveStatus(''), 4000);
       } catch (error) {
-          console.error("Error processing Excel file:", error);
-          setSaveStatus('Error reading file.');
-          setTimeout(() => setSaveStatus(''), 3000);
+          console.error('Error processing file:', error);
+          setSaveStatus('Error reading file — check the CSV format.');
+          setTimeout(() => setSaveStatus(''), 4000);
       } finally {
           setLoading(false);
       }
     };
-    reader.onerror = (error) => {
-        console.error("File reading error:", error);
-        setSaveStatus('Error reading file.');
-        setLoading(false);
-    }
+    reader.onerror = () => { setSaveStatus('Error reading file.'); setLoading(false); };
     reader.readAsArrayBuffer(file);
-     // Clear the file input value so the same file can be uploaded again if needed
-     e.target.value = null;
+    e.target.value = null;
   };
 
 
@@ -851,7 +913,7 @@ const AssessmentGrid = ({
           {/* TCA Marks Table */}
           <div className="overflow-x-auto w-full rounded-lg shadow-sm border border-gray-200">
              <table className="min-w-full border-collapse text-sm">
-                 <thead className="bg-gray-50 sticky top-0 z-10"> {/* Make headers sticky */}
+                 <thead className="bg-gray-50 sticky top-0 z-10">
                      <tr>
                          <th rowSpan="2" className="border-b p-3 text-left font-semibold text-gray-700 sticky left-0 bg-gray-50 z-20" style={{ minWidth: '150px' }}>Roll No</th>
                          <th rowSpan="2" className="border-b border-l p-3 text-left font-semibold text-gray-700 sticky left-[150px] bg-gray-50 z-20" style={{ minWidth: '180px' }}>Name</th>
@@ -863,25 +925,20 @@ const AssessmentGrid = ({
                          <th colSpan="2" className="border-b border-l p-2 text-center font-medium text-gray-600">Q1 (3)</th>
                          <th className="border-b border-l p-2 text-center font-medium text-gray-600 bg-gray-100">Total</th>
                          <th colSpan="2" className="border-b border-l p-2 text-center font-medium text-gray-600">Q2 (3)</th>
-                         {/*<th className="border-b border-l p-2 text-center font-medium text-gray-600 bg-gray-100">Total</th>*/}
                          <th colSpan="2" className="border-b border-l p-2 text-center font-medium text-gray-600">Q1 (6)</th>
                          <th className="border-b border-l p-2 text-center font-medium text-gray-600 bg-gray-100">Total</th>
                      </tr>
                      <tr>
-                        {/* Placeholder for sticky columns */}
                          <th className="border-b p-0 h-0 sticky left-0 bg-gray-50 z-20" style={{ minWidth: '150px' }}></th>
                          <th className="border-b border-l p-0 h-0 sticky left-[150px] bg-gray-50 z-20" style={{ minWidth: '180px' }}></th>
-                         {/* Part headers */}
                          <th className="border-b border-l p-2 text-center font-normal text-gray-500">P1 (1.5)</th>
                          <th className="border-b border-l p-2 text-center font-normal text-gray-500">P2 (1.5)</th>
-                         <th className="border-b border-l p-2 bg-gray-100"></th> {/* CT1 Q1 Total */}
+                         <th className="border-b border-l p-2 bg-gray-100"></th>
                          <th className="border-b border-l p-2 text-center font-normal text-gray-500">P1 (1.5)</th>
                          <th className="border-b border-l p-2 text-center font-normal text-gray-500">P2 (1.5)</th>
-                         {/*<th className="border-b border-l p-2 bg-gray-100"></th> {/* CT1 Q2 Total */}
                          <th className="border-b border-l p-2 text-center font-normal text-gray-500">P1 (3)</th>
                          <th className="border-b border-l p-2 text-center font-normal text-gray-500">P2 (3)</th>
-                         <th className="border-b border-l p-2 bg-gray-100"></th> {/* CT2 Q1 Total */}
-                         {/* Placeholder for sticky column */}
+                         <th className="border-b border-l p-2 bg-gray-100"></th>
                          <th className="border-b border-l p-0 h-0 sticky right-0 bg-gray-50 z-20" style={{ minWidth: '80px' }}></th>
                      </tr>
                  </thead>

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import CourseOutcomeMappingRow from './CourseOutcomeMappingRow'; // Adjust path if needed
+import React, { useState, useRef } from 'react';
+import CourseOutcomeMappingRow from './CourseOutcomeMappingRow';
 import api from '../../../utils/api';
+
 
 // Define the POs and PSOs for table headers
 const POS_Headers = Array.from({ length: 12 }, (_, i) => `PO${i + 1}`);
@@ -15,18 +16,59 @@ const createDefaultOutcome = () => ({
 });
 // --- ---
 
-function CoPoMappingForm() {
-    const [facultyId, setFacultyId] = useState('');
-    const [subjectCode, setSubjectCode] = useState('');
-    const [subjectName, setSubjectName] = useState('');
-    const [academicYear, setAcademicYear] = useState(''); // e.g., "2023-2024"
-    const [semester, setSemester] = useState('');
-    const [branch, setBranch] = useState('');
-    const [section, setSection] = useState('');
+function CoPoMappingForm({ facultyId, subject, onSaved }) {
     const [courseOutcomes, setCourseOutcomes] = useState([createDefaultOutcome()]);
     const [error, setError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
-    const [isLoading, setIsLoading] = useState(false);  
+    const [isLoading, setIsLoading] = useState(false);
+    const [csvError, setCsvError] = useState('');
+    const csvInputRef = useRef(null);
+
+    // ── CSV Upload: parse mapping CSV ────────────────────────────────────────
+    const handleCSVUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setCsvError('');
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const text = evt.target.result;
+                const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+                if (lines.length < 2) { setCsvError('CSV must have a header row and at least one data row.'); return; }
+
+                // Parse header (normalize: lowercase, strip spaces)
+                const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+                const coIdxMap = {
+                    co: headers.findIndex(h => h === 'co_identifier' || h === 'co'),
+                };
+                const poKeys = ['po1','po2','po3','po4','po5','po6','po7','po8','po9','po10','po11','po12'];
+                const psoKeys = ['pso1','pso2','pso3','pso4'];
+
+                if (coIdxMap.co === -1) { setCsvError('Missing "CO Identifier" column in CSV.'); return; }
+
+                const parsed = lines.slice(1).map(line => {
+                    const cols = line.split(',').map(c => c.trim());
+                    const row = createDefaultOutcome();
+                    row.coIdentifier = cols[coIdxMap.co] || '';
+                    [...poKeys, ...psoKeys].forEach(key => {
+                        const idx = headers.indexOf(key);
+                        if (idx !== -1) row[key] = Math.min(3, Math.max(0, Number(cols[idx]) || 0));
+                    });
+                    return row;
+                }).filter(r => r.coIdentifier);
+
+                if (parsed.length === 0) { setCsvError('No valid CO rows found in CSV.'); return; }
+                setCourseOutcomes(parsed);
+                setCsvError('');
+            } catch {
+                setCsvError('Failed to parse CSV. Please use the correct format.');
+            } finally {
+                if (csvInputRef.current) csvInputRef.current.value = null;
+            }
+        };
+        reader.readAsText(file);
+    };
+
 
     // --- Handlers and Validation (mostly unchanged logic) ---
     const handleCourseOutcomeChange = (index, name, value) => {
@@ -54,15 +96,8 @@ function CoPoMappingForm() {
     };
 
      const validateForm = () => {
-         if (!facultyId || !subjectCode || !subjectName || !academicYear || !semester || !branch || !section) {
-            return "Please fill in all the course details (Faculty ID, Subject, Year, Semester, etc.).";
-        }
-        if (!/^\d{4}-\d{4}$/.test(academicYear)) {
-            return "Academic Year should be in YYYY-YYYY format (e.g., 2023-2024).";
-        }
-         const semesterNum = parseInt(semester, 10);
-        if (isNaN(semesterNum) || semesterNum <= 0) {
-            return "Please enter a valid positive number for the Semester.";
+         if (!facultyId || !subject) {
+            return "Please select a subject first.";
         }
         if (!courseOutcomes || courseOutcomes.length === 0) {
             return "At least one Course Outcome mapping row is required.";
@@ -87,11 +122,16 @@ function CoPoMappingForm() {
              return;
          }
 
-        const finalSemester = parseInt(semester, 10);
+        const finalSemester = parseInt(subject.semester, 10);
 
         const formData = {
-            facultyId, subjectCode, subjectName, academicYear,
-            semester: finalSemester, branch, section,
+            facultyId, 
+            subjectCode: subject.code, 
+            subjectName: subject.name, 
+            academicYear: subject.academicYear,
+            semester: finalSemester, 
+            branch: subject.branch, 
+            section: subject.section,
             courseOutcomes: courseOutcomes.map(co => ({
                 ...co,
                 po1: Number(co.po1 ?? 0), po2: Number(co.po2 ?? 0), po3: Number(co.po3 ?? 0),
@@ -118,6 +158,8 @@ function CoPoMappingForm() {
 
             console.log('API Response:', response.data);
             setSuccessMessage(response.data.message || 'CO-PO Mapping saved successfully!');
+            if (onSaved) onSaved(); // Notify parent to refresh the table
+
 
             // Optionally reset the form after successful submission
             // setFacultyId('');
@@ -187,38 +229,21 @@ function CoPoMappingForm() {
                 </div>
             )}
 
-            {/* Course Details Section */}
+            {/* Course Details Section - Now Read Only */}
             <div className="space-y-4">
-                <h3 className="text-lg font-medium leading-6 text-gray-900">Course Details</h3>
-                {/* Responsive Grid for Course Details */}
-                <div className="grid grid-cols-1 gap-y-4 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+                <h3 className="text-lg font-medium leading-6 text-gray-900 border-b pb-2">Course Details</h3>
+                <div className="grid grid-cols-1 gap-y-4 gap-x-6 sm:grid-cols-2 lg:grid-cols-4 bg-gray-50 p-4 rounded-lg">
                     <div>
-                        <label htmlFor="facultyId" className={labelClass}>Faculty ID:</label>
-                        <input type="text" id="facultyId" value={facultyId} onChange={(e) => setFacultyId(e.target.value)} required className={inputClass} />
-                    </div>
-                     <div>
-                        <label htmlFor="subjectCode" className={labelClass}>Subject Code:</label>
-                        <input type="text" id="subjectCode" value={subjectCode} onChange={(e) => setSubjectCode(e.target.value)} required className={inputClass} />
+                        <span className="block text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</span>
+                        <span className="mt-1 flex text-sm text-gray-900 font-semibold">{subject?.code} - {subject?.name}</span>
                     </div>
                     <div>
-                        <label htmlFor="subjectName" className={labelClass}>Subject Name:</label>
-                        <input type="text" id="subjectName" value={subjectName} onChange={(e) => setSubjectName(e.target.value)} required className={inputClass} />
+                        <span className="block text-xs font-medium text-gray-500 uppercase tracking-wider">Class</span>
+                        <span className="mt-1 flex text-sm text-gray-900">{subject?.branch} {subject?.section} (Sem {subject?.semester})</span>
                     </div>
                     <div>
-                        <label htmlFor="academicYear" className={labelClass}>Academic Year (YYYY-YYYY):</label>
-                        <input type="text" id="academicYear" value={academicYear} onChange={(e) => setAcademicYear(e.target.value)} required placeholder="e.g., 2023-2024" pattern="\d{4}-\d{4}" className={inputClass} />
-                    </div>
-                     <div>
-                        <label htmlFor="semester" className={labelClass}>Semester:</label>
-                        <input type="number" id="semester" value={semester} onChange={(e) => setSemester(e.target.value)} required min="1" className={numberInputClass} />
-                    </div>
-                     <div>
-                        <label htmlFor="branch" className={labelClass}>Branch:</label>
-                        <input type="text" id="branch" value={branch} onChange={(e) => setBranch(e.target.value)} required placeholder="e.g., CSE" className={inputClass} />
-                    </div>
-                     <div>
-                        <label htmlFor="section" className={labelClass}>Section:</label>
-                        <input type="text" id="section" value={section} onChange={(e) => setSection(e.target.value.toUpperCase())} required placeholder="e.g., A" className={`${inputClass} uppercase`} />
+                        <span className="block text-xs font-medium text-gray-500 uppercase tracking-wider">Academic Year</span>
+                        <span className="mt-1 flex text-sm text-gray-900">{subject?.academicYear}</span>
                     </div>
                 </div>
             </div>
@@ -266,16 +291,37 @@ function CoPoMappingForm() {
                         </tbody>
                     </table>
                 </div>
-                 {/* Add Row Button */}
-                 <div className="flex justify-start">
-                      <button
+                {/* Toolbar: Add Row | Upload CSV | Download Sample */}
+                <div className="flex flex-wrap items-center gap-3 mt-3">
+                    <button
                         type="button"
                         onClick={addCourseOutcomeRow}
-                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 ease-in-out"
+                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition"
                     >
                         + Add CO Row
                     </button>
-                 </div>
+
+                    <label className="inline-flex items-center gap-2 px-4 py-2 border border-indigo-300 text-sm font-medium rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 cursor-pointer transition select-none">
+                        📂 Upload Mapping CSV
+                        <input
+                            type="file"
+                            accept=".csv"
+                            className="hidden"
+                            ref={csvInputRef}
+                            onChange={handleCSVUpload}
+                        />
+                    </label>
+
+                    <a
+                        href="/sample_copo_mapping.csv"
+                        download
+                        className="inline-flex items-center gap-1 px-3 py-2 border border-gray-300 text-xs font-medium rounded-md text-gray-600 hover:bg-gray-100 transition no-underline"
+                    >
+                        ⬇ Sample CSV
+                    </a>
+
+                    {csvError && <p className="text-xs text-red-600 w-full mt-1">⚠️ {csvError}</p>}
+                </div>
             </div>
 
             {/* Form Actions (Submit Button) */}
