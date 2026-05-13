@@ -202,6 +202,14 @@ const SideBar = () => {
                 <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
                 Attainment Dashboard
               </div>
+              <div onClick={() => window.location.href = `/analytics`} className="w-full text-left px-3 py-2 text-sm text-purple-700 hover:text-purple-900 hover:bg-purple-50 rounded-md transition-all duration-200 flex items-center gap-2 cursor-pointer font-semibold">
+                <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>
+                🧠 AI Analytics
+              </div>
+              <div onClick={() => window.location.href = `/nirf`} className="w-full text-left px-3 py-2 text-sm text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 rounded-md transition-all duration-200 flex items-center gap-2 cursor-pointer font-semibold">
+                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+                🏆 NIRF Predictor
+              </div>
             </div>
           </details>
         </nav>
